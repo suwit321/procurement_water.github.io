@@ -1,0 +1,784 @@
+﻿<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="แดชบอร์ดวิเคราะห์ความเสี่ยงการจัดซื้อจัดจ้างภาครัฐ">
+<meta name="theme-color" content="#0f766e">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>📊</text></svg>">
+<title>Procurement Analytics</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css">
+<link rel="stylesheet" href="css/style.css?v=14">
+</head>
+<body>
+
+<div id="bootScreen" class="boot-screen">
+  <div class="spinner-border text-teal mb-3" role="status"><span class="visually-hidden">กำลังโหลด</span></div>
+  <div id="bootMessage">กำลังโหลดข้อมูล...</div>
+  <div class="small-muted mt-2">ครั้งแรกอาจใช้เวลาสักครู่ เนื่องจากต้องประมวลผลสัญญากว่าหนึ่งหมื่นรายการ</div>
+</div>
+
+<div id="appRoot" hidden>
+
+  <div class="topbar">
+    <div class="container-fluid px-3 px-lg-4 py-2">
+      <div class="d-flex flex-wrap align-items-center gap-2">
+        <div class="brand me-auto">
+          <strong>Procurement Analytics</strong>
+          <span class="small-muted ms-2 d-none d-md-inline" id="metaLine"></span>
+        </div>
+        <button class="btn btn-sm btn-outline-secondary" id="provenanceBtn" type="button">
+          ที่มาของข้อมูล
+        </button>
+        <button class="btn btn-sm btn-outline-secondary" id="exportBtn" type="button">
+          ส่งออก CSV
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="container-fluid px-3 px-lg-4 pb-4">
+
+    <!-- ตัวกรองส่วนกลาง: มีผลกับทุกแท็บพร้อมกัน -->
+    <section class="cardx filter-bar mt-3 mb-3" aria-label="ตัวกรองส่วนกลาง">
+      <div class="row g-2 align-items-end">
+        <div class="col-6 col-md-3 col-xl-2">
+          <label class="form-label" for="gfSearch">ค้นหา</label>
+          <input class="form-control form-control-sm" id="gfSearch" type="search"
+                 placeholder="โครงการ / หน่วยงาน / ผู้รับจ้าง">
+        </div>
+        <div class="col-6 col-md-3 col-xl-2">
+          <label class="form-label" for="gfProvince">จังหวัด</label>
+          <select class="form-select form-select-sm" id="gfProvince"></select>
+        </div>
+        <div class="col-6 col-md-3 col-xl-2">
+          <label class="form-label" for="gfMethod">วิธีจัดหา</label>
+          <select class="form-select form-select-sm" id="gfMethod"></select>
+        </div>
+        <div class="col-6 col-md-3 col-xl-2">
+          <label class="form-label" for="gfType">ประเภทโครงการ</label>
+          <select class="form-select form-select-sm" id="gfType"></select>
+        </div>
+        <div class="col-6 col-md-3 col-xl-1">
+          <label class="form-label" for="gfBand">ระดับเสี่ยง</label>
+          <select class="form-select form-select-sm" id="gfBand"></select>
+        </div>
+        <div class="col-6 col-md-3 col-xl-1">
+          <label class="form-label" for="gfRule">กฎ</label>
+          <select class="form-select form-select-sm" id="gfRule"></select>
+        </div>
+        <div class="col-6 col-md-3 col-xl-1">
+          <label class="form-label" for="gfMinValue">มูลค่า ≥ (ลบ.)</label>
+          <input class="form-control form-control-sm" id="gfMinValue" type="number" min="0" step="0.5" placeholder="0">
+        </div>
+        <div class="col-6 col-md-3 col-xl-1">
+          <label class="form-label d-block">&nbsp;</label>
+          <button class="btn btn-sm btn-outline-secondary w-100" id="gfReset" type="button">ล้าง</button>
+        </div>
+      </div>
+      <div class="filter-summary mt-2" id="gfSummary" aria-live="polite"></div>
+    </section>
+
+    <div class="row g-3 mb-3" id="kpis"></div>
+
+    <ul class="nav nav-pills mb-3 gap-2 flex-wrap" role="tablist">
+      <li class="nav-item" role="presentation">
+        <button class="nav-link active" id="pill-overview" data-bs-toggle="pill" data-bs-target="#tab-overview"
+                type="button" role="tab" aria-controls="tab-overview" aria-selected="true">ภาพรวม</button></li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="pill-explain" data-bs-toggle="pill" data-bs-target="#tab-explain"
+                type="button" role="tab" aria-controls="tab-explain" aria-selected="false">รายโครงการ + GIS</button></li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link fraud-active" id="pill-fraud" data-bs-toggle="pill" data-bs-target="#tab-fraud"
+                type="button" role="tab" aria-controls="tab-fraud" aria-selected="false">Red Flags</button></li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link anomaly-active" id="pill-anomaly" data-bs-toggle="pill" data-bs-target="#tab-anomaly"
+                type="button" role="tab" aria-controls="tab-anomaly" aria-selected="false">ความผิดปกติเชิงสถิติ</button></li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="pill-network" data-bs-toggle="pill" data-bs-target="#tab-network"
+                type="button" role="tab" aria-controls="tab-network" aria-selected="false">เครือข่าย</button></li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link contractor-active" id="pill-contractor" data-bs-toggle="pill" data-bs-target="#tab-contractor"
+                type="button" role="tab" aria-controls="tab-contractor" aria-selected="false">ผู้รับจ้าง</button></li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="pill-time" data-bs-toggle="pill" data-bs-target="#tab-time"
+                type="button" role="tab" aria-controls="tab-time" aria-selected="false">แนวโน้มเวลา</button></li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="pill-rules" data-bs-toggle="pill" data-bs-target="#tab-rules"
+                type="button" role="tab" aria-controls="tab-rules" aria-selected="false">กฎและการตั้งค่า</button></li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link demo-active" id="pill-demo" data-bs-toggle="pill" data-bs-target="#tab-demo"
+                type="button" role="tab" aria-controls="tab-demo" aria-selected="false">ส่วนสาธิต</button></li>
+    </ul>
+
+    <div class="tab-content">
+
+      <!-- ============ ภาพรวม ============ -->
+      <div class="tab-pane fade show active" id="tab-overview" role="tabpanel" aria-labelledby="pill-overview">
+        <div class="hero mb-3">
+          <h1 class="h4 mb-2">ภาพรวมความเสี่ยงการจัดซื้อจัดจ้าง</h1>
+          <div class="small" id="overviewLede"></div>
+        </div>
+        <div class="row g-3">
+          <div class="col-lg-4">
+            <div class="cardx p-3 h-100">
+              <div class="card-title-row"><h2 class="h6 mb-0">การกระจายระดับความเสี่ยง</h2>
+                <span class="badge badge-derived">คำนวณ</span></div>
+              <div id="ovBandDonut" style="height:250px"></div>
+            </div>
+          </div>
+          <div class="col-lg-8">
+            <div class="cardx p-3 h-100">
+              <div class="card-title-row"><h2 class="h6 mb-0">จำนวนสัญญาที่เข้าเงื่อนไขแต่ละกฎ</h2>
+                <span class="badge badge-derived">คำนวณ</span></div>
+              <div id="ovRuleBar" style="height:250px"></div>
+            </div>
+          </div>
+          <div class="col-lg-7">
+            <div class="cardx p-3 h-100">
+              <div class="card-title-row"><h2 class="h6 mb-0">จำนวนและมูลค่าสัญญารายเดือน</h2>
+                <span class="badge badge-real">ข้อมูลจริง</span></div>
+              <div id="ovMonthly" style="height:280px"></div>
+            </div>
+          </div>
+          <div class="col-lg-5">
+            <div class="cardx p-3 h-100">
+              <div class="card-title-row"><h2 class="h6 mb-0">สัดส่วนวิธีจัดหา</h2>
+                <span class="badge badge-real">ข้อมูลจริง</span></div>
+              <div id="ovMethodDonut" style="height:280px"></div>
+            </div>
+          </div>
+          <div class="col-lg-6">
+            <div class="cardx p-3 h-100">
+              <div class="card-title-row"><h2 class="h6 mb-0">หน่วยงานที่มีมูลค่าเข้าเงื่อนไขสูงสุด</h2>
+                <span class="badge badge-derived">คำนวณ</span></div>
+              <div class="table-wrap"><table class="table table-sm mini-table mb-0">
+                <thead><tr><th scope="col">หน่วยงาน</th><th scope="col" class="text-end">สัญญา</th>
+                  <th scope="col" class="text-end">เข้าเงื่อนไข</th><th scope="col" class="text-end">มูลค่า</th></tr></thead>
+                <tbody id="ovAgencyBody"></tbody></table></div>
+            </div>
+          </div>
+          <div class="col-lg-6">
+            <div class="cardx p-3 h-100">
+              <div class="card-title-row"><h2 class="h6 mb-0">โครงการที่คะแนนความเสี่ยงสูงสุด</h2>
+                <span class="badge badge-derived">คำนวณ</span></div>
+              <div class="table-wrap"><table class="table table-sm mini-table mb-0">
+                <thead><tr><th scope="col">โครงการ</th><th scope="col" class="text-end">มูลค่า</th>
+                  <th scope="col" class="text-end">คะแนน</th></tr></thead>
+                <tbody id="ovTopRiskBody"></tbody></table></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ รายโครงการ + GIS ============ -->
+      <div class="tab-pane fade" id="tab-explain" role="tabpanel" aria-labelledby="pill-explain">
+        <div class="row g-3">
+          <div class="col-xl-3">
+            <div class="cardx p-3 h-100">
+              <div class="card-title-row"><h2 class="h6 mb-0">รายการโครงการ</h2>
+                <span class="small-muted" id="listCount"></span></div>
+              <div class="small-muted mb-2">เรียงตามคะแนนความเสี่ยง</div>
+              <div id="list" class="list-box"></div>
+            </div>
+          </div>
+          <div class="col-xl-4">
+            <div class="cardx p-3 mb-3">
+              <h2 class="h6">รายละเอียดโครงการ</h2>
+              <div id="detail"></div>
+            </div>
+            <div class="cardx p-3">
+              <div class="card-title-row"><h2 class="h6 mb-0">สัญญาณความเสี่ยงที่พบ</h2>
+                <span class="badge badge-derived">คำนวณ</span></div>
+              <div id="rulesPanel"></div>
+            </div>
+          </div>
+          <div class="col-xl-5">
+            <div class="cardx p-3 mb-3" id="mapCard">
+              <div class="card-title-row">
+                <h2 class="h6 mb-0">แผนที่โครงการ</h2>
+                <div class="d-flex align-items-center gap-2">
+                  <span class="badge badge-real">พิกัดจริง</span>
+                  <button class="btn btn-sm btn-outline-secondary py-0 px-2" id="mapFullscreen"
+                          type="button" title="ขยายเต็มจอ" aria-label="ขยายแผนที่เต็มจอ">⛶</button>
+                </div>
+              </div>
+
+              <div class="map-toolbar">
+                <div class="map-tool">
+                  <label class="form-label" for="mapMode">รูปแบบหมุด</label>
+                  <div class="btn-group btn-group-sm w-100" role="group" id="mapMode" aria-label="รูปแบบการแสดงหมุด">
+                    <button class="btn btn-outline-secondary active" data-mapmode="cluster"
+                            type="button" aria-pressed="true">กลุ่ม</button>
+                    <button class="btn btn-outline-secondary" data-mapmode="points"
+                            type="button" aria-pressed="false">รายจุด</button>
+                    <button class="btn btn-outline-secondary" data-mapmode="heat"
+                            type="button" aria-pressed="false">ความหนาแน่น</button>
+                  </div>
+                </div>
+                <div class="map-tool">
+                  <label class="form-label" for="mapColorBy">ปักหมุดตาม</label>
+                  <select class="form-select form-select-sm" id="mapColorBy">
+                    <option value="band">ระดับความเสี่ยง</option>
+                    <option value="rule">กฎที่พบ (น้ำหนักสูงสุด)</option>
+                    <option value="category">หมวดของสัญญาณ</option>
+                    <option value="method">วิธีจัดหา</option>
+                    <option value="type">ประเภทโครงการ</option>
+                    <option value="value">ช่วงมูลค่าสัญญา</option>
+                  </select>
+                </div>
+                <div class="map-tool">
+                  <label class="form-label" for="mapBasemap">พื้นหลัง</label>
+                  <select class="form-select form-select-sm" id="mapBasemap">
+                    <option value="light">สว่าง</option>
+                    <option value="street">ถนน</option>
+                    <option value="dark">มืด</option>
+                    <option value="satellite">ภาพถ่ายดาวเทียม</option>
+                  </select>
+                </div>
+                <div class="map-tool map-tool-check">
+                  <div class="form-check form-switch mb-0">
+                    <input class="form-check-input" type="checkbox" role="switch" id="mapSizeByValue" checked>
+                    <label class="form-check-label small" for="mapSizeByValue">ขนาดหมุดตามมูลค่า</label>
+                  </div>
+                </div>
+              </div>
+
+              <div class="map-shell">
+                <div id="map"></div>
+                <div class="map-overlay-stats" id="mapStats" aria-live="polite"></div>
+                <div class="map-legend" id="mapLegend" aria-label="คำอธิบายสัญลักษณ์บนแผนที่"></div>
+              </div>
+
+              <div class="d-flex flex-wrap gap-2 mt-2">
+                <button class="btn btn-sm btn-outline-secondary" id="mapFilterToView" type="button">
+                  กรองเฉพาะพื้นที่ที่เห็น
+                </button>
+                <button class="btn btn-sm btn-outline-secondary" id="mapResetView" type="button">
+                  คืนมุมมองทั้งประเทศ
+                </button>
+                <button class="btn btn-sm btn-outline-secondary" id="mapFitData" type="button">
+                  ซูมให้พอดีข้อมูล
+                </button>
+              </div>
+
+              <div class="info-note mt-2">
+                <strong>ข้อจำกัดของแผนที่:</strong> ชุดข้อมูลมีพิกัดเฉพาะงาน<strong>จ้างก่อสร้าง</strong>
+                (6,728 จาก 6,780 รายการ) ส่วนงานซื้อ จ้างทำของ เช่า ออกแบบ และที่ปรึกษา
+                รวม 3,394 รายการ ไม่มีพิกัดในต้นฉบับเลย แผนที่จึงไม่ได้แทนภาพรวมทั้งหมด
+                <br>นอกจากนี้ พิกัดคือที่ตั้งโครงการ แต่คอลัมน์จังหวัดคือที่ตั้งหน่วยงาน
+                ทั้งสองอย่างไม่จำเป็นต้องตรงกัน
+              </div>
+            </div>
+            <div class="cardx p-3">
+              <div class="card-title-row"><h2 class="h6 mb-0">ที่มาของคะแนน</h2>
+                <span class="badge badge-derived">คำนวณ</span></div>
+              <div id="waterfall" style="height:240px"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ Red Flags ============ -->
+      <div class="tab-pane fade" id="tab-fraud" role="tabpanel" aria-labelledby="pill-fraud">
+        <div class="hero-fraud mb-3">
+          <h1 class="h5 mb-2">สัญญาณเตือนความเสี่ยงทุจริต</h1>
+          <div class="small">จัดกลุ่มตามมิติของสัญญาณ อ้างอิงแนวทางสากลด้านการตรวจสอบการจัดซื้อจัดจ้าง
+            ทุกตัวเลขคำนวณสดจากชุดข้อมูลที่กรองอยู่</div>
+        </div>
+        <div class="row g-3 mb-3" id="fraudKpis"></div>
+        <div class="row g-3 mb-3" id="fraudDims"></div>
+        <div class="row g-3">
+          <div class="col-lg-4">
+            <div class="cardx p-3 h-100"><h2 class="h6">ระดับความเสี่ยง</h2>
+              <div id="fraudSeverityDonut" style="height:250px"></div></div>
+          </div>
+          <div class="col-lg-4">
+            <div class="cardx p-3 h-100"><h2 class="h6">หมวดของสัญญาณ</h2>
+              <div id="fraudCategoryBar" style="height:250px"></div></div>
+          </div>
+          <div class="col-lg-4">
+            <div class="cardx p-3 h-100"><h2 class="h6">การกระจายคะแนนความเสี่ยง</h2>
+              <div id="fraudHistogram" style="height:250px"></div></div>
+          </div>
+
+          <div class="col-lg-6">
+            <div class="cardx p-3 h-100">
+              <div class="card-title-row"><h2 class="h6 mb-0">เลขภาษีกับชื่อไม่สอดคล้อง</h2>
+                <span class="badge badge-real">ข้อมูลจริง</span></div>
+              <div class="small-muted mb-2">ตรวจหลังทำชื่อให้เป็นมาตรฐานและตัดเลขภาษีที่ถูกปิดบังออกแล้ว</div>
+              <div class="table-wrap"><table class="table table-sm mini-table mb-0">
+                <thead><tr><th scope="col">คีย์</th><th scope="col">รายการที่ผูกอยู่</th>
+                  <th scope="col" class="text-end">สัญญา</th><th scope="col" class="text-end">มูลค่า</th></tr></thead>
+                <tbody id="tinMismatchBody"></tbody></table></div>
+            </div>
+          </div>
+          <div class="col-lg-6">
+            <div class="cardx p-3 h-100">
+              <div class="card-title-row"><h2 class="h6 mb-0">สงสัยการแบ่งซื้อแบ่งจ้าง</h2>
+                <span class="badge badge-real">ข้อมูลจริง</span></div>
+              <div class="small-muted mb-2">หน่วยงานและผู้รับจ้างคู่เดิม ทำสัญญาหลายฉบับในวันเดียวกัน</div>
+              <div class="table-wrap"><table class="table table-sm mini-table mb-0">
+                <thead><tr><th scope="col">หน่วยงาน</th><th scope="col">ผู้รับจ้าง</th><th scope="col">วันที่</th>
+                  <th scope="col" class="text-end">ฉบับ</th><th scope="col" class="text-end">รวม</th></tr></thead>
+                <tbody id="splitContractBody"></tbody></table></div>
+            </div>
+          </div>
+          <div class="col-lg-6">
+            <div class="cardx p-3 h-100">
+              <div class="card-title-row"><h2 class="h6 mb-0">หน่วยงานที่ใช้วิธีเฉพาะเจาะจงสูง</h2>
+                <span class="badge badge-real">ข้อมูลจริง</span></div>
+              <div class="small-muted mb-2">เฉพาะหน่วยงานที่มีสัญญาตั้งแต่ 5 ฉบับขึ้นไป</div>
+              <div class="table-wrap"><table class="table table-sm mini-table mb-0">
+                <thead><tr><th scope="col">หน่วยงาน</th><th scope="col" class="text-end">สัญญา</th>
+                  <th scope="col" class="text-end">สัดส่วน</th><th scope="col" class="text-end">มูลค่า</th></tr></thead>
+                <tbody id="noncompeteBody"></tbody></table></div>
+            </div>
+          </div>
+          <div class="col-lg-6">
+            <div class="cardx p-3 h-100">
+              <div class="card-title-row"><h2 class="h6 mb-0">การผลัดกันชนะ</h2>
+                <span class="badge badge-real">ข้อมูลจริง</span></div>
+              <div class="small-muted mb-2">ผู้รับจ้างสองรายผลัดกันได้งานในหน่วยงานเดียวอย่างสม่ำเสมอ</div>
+              <div class="table-wrap"><table class="table table-sm mini-table mb-0">
+                <thead><tr><th scope="col">หน่วยงาน</th><th scope="col">คู่ที่ผลัดกัน</th>
+                  <th scope="col" class="text-end">สัดส่วน</th><th scope="col" class="text-end">มูลค่า</th></tr></thead>
+                <tbody id="rotationBody"></tbody></table></div>
+            </div>
+          </div>
+
+          <div class="col-12">
+            <div class="cardx p-3">
+              <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+                <h2 class="h6 mb-0">สัญญาที่ควรตรวจสอบก่อน</h2>
+                <div class="d-flex gap-2 align-items-center">
+                  <span class="small-muted" id="fraudCaseCount"></span>
+                  <button class="btn btn-sm btn-outline-secondary" id="fraudExport" type="button">ส่งออก CSV</button>
+                </div>
+              </div>
+              <div class="table-wrap" style="max-height:460px"><table class="table table-sm mini-table mb-0">
+                <thead><tr><th scope="col">โครงการ</th><th scope="col">หน่วยงาน</th><th scope="col">ผู้รับจ้าง</th>
+                  <th scope="col" class="text-end">มูลค่า</th><th scope="col" class="text-end">คะแนน</th>
+                  <th scope="col">ระดับ</th><th scope="col">กฎที่เข้าเงื่อนไข</th></tr></thead>
+                <tbody id="fraudCaseBody"></tbody></table></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ ความผิดปกติเชิงสถิติ ============ -->
+      <div class="tab-pane fade" id="tab-anomaly" role="tabpanel" aria-labelledby="pill-anomaly">
+        <div class="hero-anomaly mb-3">
+          <h1 class="h5 mb-2">ความผิดปกติเชิงสถิติ</h1>
+          <div class="small">ตรวจหารูปแบบที่ไม่น่าเกิดขึ้นเองตามธรรมชาติ เช่น การกองตัวใต้เพดานราคา
+            การไม่มีส่วนลดจากราคากลาง และการกระจายตัวเลขที่เบี่ยงจากกฎเบนฟอร์ด</div>
+        </div>
+        <div class="row g-3">
+          <div class="col-lg-6">
+            <div class="cardx p-3 h-100">
+              <div class="card-title-row"><h2 class="h6 mb-0">การกองตัวใต้เพดานราคา</h2>
+                <span class="badge badge-derived">คำนวณ</span></div>
+              <div class="small-muted mb-2" id="anCliffNote"></div>
+              <div id="anCliffChart" style="height:280px"></div>
+            </div>
+          </div>
+          <div class="col-lg-6">
+            <div class="cardx p-3 h-100">
+              <div class="card-title-row"><h2 class="h6 mb-0">อัตราส่วนราคาสัญญาต่อราคากลาง</h2>
+                <span class="badge badge-derived">คำนวณ</span></div>
+              <div class="small-muted mb-2" id="anRatioNote"></div>
+              <div id="anRatioChart" style="height:280px"></div>
+            </div>
+          </div>
+          <div class="col-lg-6">
+            <div class="cardx p-3 h-100">
+              <div class="card-title-row"><h2 class="h6 mb-0">การกระจายเลขหลักแรก (กฎเบนฟอร์ด)</h2>
+                <span class="badge badge-derived">คำนวณ</span></div>
+              <div class="small-muted mb-2" id="anBenfordNote"></div>
+              <div id="anBenfordChart" style="height:280px"></div>
+            </div>
+          </div>
+          <div class="col-lg-6">
+            <div class="cardx p-3 h-100">
+              <div class="card-title-row"><h2 class="h6 mb-0">หน่วยงานที่เบี่ยงจากกฎเบนฟอร์ดมากที่สุด</h2>
+                <span class="badge badge-derived">คำนวณ</span></div>
+              <div class="small-muted mb-2">เฉพาะหน่วยงานที่มีสัญญาตั้งแต่ 30 ฉบับ · ค่าวิกฤต chi-square = 15.51</div>
+              <div class="table-wrap"><table class="table table-sm mini-table mb-0">
+                <thead><tr><th scope="col">หน่วยงาน</th><th scope="col" class="text-end">สัญญา</th>
+                  <th scope="col" class="text-end">chi-square</th><th scope="col">ผล</th></tr></thead>
+                <tbody id="anBenfordBody"></tbody></table></div>
+            </div>
+          </div>
+          <div class="col-lg-7">
+            <div class="cardx p-3 h-100">
+              <div class="card-title-row"><h2 class="h6 mb-0">ราคาสูงผิดปกติเทียบกลุ่มเปรียบเทียบ</h2>
+                <span class="badge badge-derived">คำนวณ</span></div>
+              <div class="small-muted mb-2">เทียบภายในกลุ่ม ประเภทโครงการ x วิธีจัดหา ด้วยขอบเขต IQR</div>
+              <div class="table-wrap"><table class="table table-sm mini-table mb-0">
+                <thead><tr><th scope="col">โครงการ</th><th scope="col">กลุ่มเปรียบเทียบ</th>
+                  <th scope="col" class="text-end">มูลค่า</th><th scope="col" class="text-end">เท่าของมัธยฐาน</th></tr></thead>
+                <tbody id="anOutlierBody"></tbody></table></div>
+            </div>
+          </div>
+          <div class="col-lg-5">
+            <div class="cardx p-3 h-100">
+              <div class="card-title-row"><h2 class="h6 mb-0">ระยะเวลาสัญญาผิดปกติ</h2>
+                <span class="badge badge-derived">คำนวณ</span></div>
+              <div class="small-muted mb-2" id="anDurationNote"></div>
+              <div class="table-wrap"><table class="table table-sm mini-table mb-0">
+                <thead><tr><th scope="col">โครงการ</th><th scope="col" class="text-end">ระยะเวลา</th>
+                  <th scope="col">ประเภท</th></tr></thead>
+                <tbody id="anDurationBody"></tbody></table></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ เครือข่าย ============ -->
+      <div class="tab-pane fade" id="tab-network" role="tabpanel" aria-labelledby="pill-network">
+        <div class="cardx p-3 mb-3">
+          <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+            <div class="btn-group btn-group-sm subnav" role="group" aria-label="รูปแบบการแสดงเครือข่าย">
+              <button class="btn btn-outline-secondary active net-view-btn" data-view="sankey" type="button" aria-pressed="true">แผนภาพการไหล</button>
+              <button class="btn btn-outline-secondary net-view-btn" data-view="bubble" type="button" aria-pressed="false">ฟองอากาศ</button>
+              <button class="btn btn-outline-secondary net-view-btn" data-view="treemap" type="button" aria-pressed="false">ทรีแมป</button>
+              <button class="btn btn-outline-secondary net-view-btn" data-view="matrix" type="button" aria-pressed="false">ตารางความร้อน</button>
+            </div>
+            <button class="btn btn-sm btn-outline-secondary" id="netReset" type="button">ล้างตัวกรองเครือข่าย</button>
+          </div>
+
+          <div class="row g-2 align-items-end">
+            <div class="col-6 col-md-4 col-xl-2">
+              <label class="form-label" for="netAgency">หน่วยงาน</label>
+              <select class="form-select form-select-sm" id="netAgency"></select>
+            </div>
+            <div class="col-6 col-md-4 col-xl-2">
+              <label class="form-label" for="netContractor">ผู้รับจ้าง</label>
+              <select class="form-select form-select-sm" id="netContractor"></select>
+            </div>
+            <div class="col-6 col-md-4 col-xl-2">
+              <label class="form-label" for="netRule">กฎที่พบในคู่นั้น</label>
+              <select class="form-select form-select-sm" id="netRule"></select>
+            </div>
+            <div class="col-6 col-md-4 col-xl-2">
+              <label class="form-label" for="netBand">ระดับเสี่ยงสูงสุดของคู่</label>
+              <select class="form-select form-select-sm" id="netBand"></select>
+            </div>
+            <div class="col-6 col-md-4 col-xl-2">
+              <label class="form-label" for="netColorBy">ระบายสีตาม</label>
+              <select class="form-select form-select-sm" id="netColorBy">
+                <option value="entity">ประเภทโหนด</option>
+                <option value="risk">ระดับเสี่ยงของคู่</option>
+                <option value="community">กลุ่มในเครือข่าย</option>
+                <option value="composite">คะแนนเครือข่าย</option>
+              </select>
+            </div>
+            <div class="col-6 col-md-4 col-xl-2">
+              <label class="form-label" for="netMinContracts">สัญญาต่อคู่ ≥ <span id="netMinContractsLabel">1</span></label>
+              <input class="form-range" id="netMinContracts" type="range" min="1" max="30" step="1" value="1">
+            </div>
+            <div class="col-6 col-md-4 col-xl-2">
+              <label class="form-label" for="netTopN">จำนวนเส้นเชื่อม: <span id="netTopNLabel">40</span></label>
+              <input class="form-range" id="netTopN" type="range" min="10" max="150" step="5" value="40">
+            </div>
+            <div class="col-6 col-md-4 col-xl-2">
+              <label class="form-label" for="netMinValue">มูลค่าขั้นต่ำ (ลบ.): <span id="netMinValueLabel">0</span></label>
+              <input class="form-range" id="netMinValue" type="range" min="0" max="50" step="1" value="0">
+            </div>
+            <div class="col-12 col-xl-4 d-flex align-items-end gap-3 flex-wrap">
+              <div class="form-check form-switch mb-0">
+                <input class="form-check-input" type="checkbox" role="switch" id="netFlaggedOnly">
+                <label class="form-check-label small" for="netFlaggedOnly">เฉพาะคู่ที่พบสัญญาณ</label>
+              </div>
+              <div class="form-check form-switch mb-0">
+                <input class="form-check-input" type="checkbox" role="switch" id="netMaskedOut">
+                <label class="form-check-label small" for="netMaskedOut">ตัดเลขภาษีที่ถูกปิดบัง</label>
+              </div>
+            </div>
+          </div>
+          <div class="filter-summary mt-2" id="netSummary" aria-live="polite"></div>
+        </div>
+        <div class="row g-3">
+          <div class="col-xl-8">
+            <div class="cardx p-3 mb-3">
+              <div class="card-title-row"><h2 class="h6 mb-0">เครือข่ายหน่วยงานกับผู้รับจ้าง</h2>
+                <span class="badge badge-real">ข้อมูลจริง</span></div>
+              <div id="networkChart" style="height:470px"></div>
+            </div>
+            <div class="cardx p-3 mb-3">
+              <div class="card-title-row"><h2 class="h6 mb-0">คู่หน่วยงาน-ผู้รับจ้างที่มีมูลค่าสูงสุด</h2>
+                <span class="badge badge-real">ข้อมูลจริง</span></div>
+              <div class="table-wrap"><table class="table table-sm mini-table mb-0">
+                <thead><tr><th scope="col">หน่วยงาน</th><th scope="col">ผู้รับจ้าง</th>
+                  <th scope="col" class="text-end">มูลค่ารวม</th><th scope="col" class="text-end">สัญญา</th></tr></thead>
+                <tbody id="netTableBody"></tbody></table></div>
+            </div>
+            <div class="cardx p-3">
+              <div class="card-title-row"><h2 class="h6 mb-0">ตัวชี้วัดคัดกรองรายหน่วยงาน</h2>
+                <span class="badge badge-derived">คำนวณ</span></div>
+              <div class="small-muted mb-2">เฉพาะหน่วยงานที่มีสัญญาตั้งแต่ 5 ฉบับ จึงจะคำนวณการกระจายราคาได้อย่างมีความหมาย</div>
+              <div class="table-wrap"><table class="table table-sm mini-table mb-0">
+                <thead><tr><th scope="col">หน่วยงาน</th><th scope="col" class="text-end">สัญญา</th>
+                  <th scope="col" class="text-end">การกระจายราคา</th>
+                  <th scope="col" class="text-end">ส่วนแบ่งรายใหญ่สุด</th><th scope="col">ระดับ</th></tr></thead>
+                <tbody id="screenTableBody"></tbody></table></div>
+            </div>
+          </div>
+          <div class="col-xl-4">
+            <div class="cardx p-3 mb-3">
+              <div class="card-title-row"><h2 class="h6 mb-0">คะแนนเครือข่ายสูงสุด</h2>
+                <span class="badge badge-derived">คำนวณ</span></div>
+              <div class="small-muted mb-2">รวมความกว้างของเครือข่าย มูลค่าที่ไหลผ่าน และความเป็นตัวกลาง</div>
+              <div id="compositeRisk" class="list-box" style="max-height:26vh"></div>
+            </div>
+            <div class="cardx p-3 mb-3">
+              <div class="card-title-row"><h2 class="h6 mb-0">การกระจุกตัวของตลาด (HHI)</h2>
+                <span class="badge badge-derived">คำนวณ</span></div>
+              <div class="small-muted mb-2">HHI เกิน 2,500 ถือว่ากระจุกตัวสูง · เฉพาะหน่วยงานที่มีสัญญาตั้งแต่ 5 ฉบับ</div>
+              <div id="hhiChart" style="height:340px"></div>
+            </div>
+            <div class="cardx p-3 mb-3">
+              <div class="card-title-row"><h2 class="h6 mb-0">ผู้รับจ้างที่ได้งานหลายหน่วยงาน</h2>
+                <span class="badge badge-real">ข้อมูลจริง</span></div>
+              <div id="repeatWinners" class="list-box" style="max-height:24vh"></div>
+            </div>
+            <div class="cardx p-3">
+              <div class="card-title-row"><h2 class="h6 mb-0">ผู้รับจ้างมูลค่าสูงสุด</h2>
+                <span class="badge badge-real">ข้อมูลจริง</span></div>
+              <div id="topContractors" class="list-box" style="max-height:24vh"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ ผู้รับจ้าง ============ -->
+      <div class="tab-pane fade" id="tab-contractor" role="tabpanel" aria-labelledby="pill-contractor">
+        <div class="hero-contractor mb-3">
+          <h1 class="h5 mb-2">การจัดลำดับความเสี่ยงผู้รับจ้าง</h1>
+          <div class="small">ประเมิน 5 มิติ ทุกมิติอยู่บนสเกล 0-100 เท่ากัน
+            ถ่วงน้ำหนัก เครือข่าย 30% · ราคา 20% · การแข่งขัน 20% · สัญญา 20% · การกระจุกตัว 10%</div>
+        </div>
+        <div class="warn-note mb-3">
+          คะแนนนี้ใช้เพื่อจัดลำดับความสำคัญในการตรวจสอบเท่านั้น ไม่ใช่ข้อสรุปว่ามีการกระทำผิด
+          ทุกกรณีต้องตรวจสอบเอกสารประกอบก่อน
+        </div>
+        <div class="row g-3 mb-3" id="contractorKpis"></div>
+        <div class="row g-3">
+          <div class="col-xl-4">
+            <div class="cardx p-3 h-100">
+              <div class="row g-2 mb-2">
+                <div class="col-12">
+                  <label class="form-label" for="contractorSearch">ค้นหาผู้รับจ้าง</label>
+                  <input class="form-control form-control-sm" id="contractorSearch" type="search" placeholder="ชื่อผู้รับจ้าง">
+                </div>
+                <div class="col-6">
+                  <label class="form-label" for="contractorRiskMin">คะแนน ≥ <span id="contractorRiskMinLabel">0</span></label>
+                  <input class="form-range" id="contractorRiskMin" type="range" min="0" max="80" step="5" value="0">
+                </div>
+                <div class="col-6">
+                  <label class="form-label" for="contractorContractMin">สัญญา ≥ <span id="contractorContractMinLabel">1</span></label>
+                  <input class="form-range" id="contractorContractMin" type="range" min="1" max="50" step="1" value="1">
+                </div>
+              </div>
+              <div class="card-title-row"><h2 class="h6 mb-0">ลำดับที่ควรตรวจสอบ</h2>
+                <span class="small-muted" id="contractorCount"></span></div>
+              <div id="contractorRankList" class="list-box contractor-list"></div>
+            </div>
+          </div>
+          <div class="col-xl-8">
+            <div class="row g-3">
+              <div class="col-md-7">
+                <div class="cardx p-3 h-100">
+                  <div class="card-title-row"><h2 class="h6 mb-0">ข้อมูลผู้รับจ้าง</h2>
+                    <span class="badge badge-derived">คำนวณ</span></div>
+                  <div id="contractorProfile"></div>
+                </div>
+              </div>
+              <div class="col-md-5">
+                <div class="cardx p-3 h-100">
+                  <h2 class="h6">องค์ประกอบคะแนน 5 มิติ</h2>
+                  <div id="contractorRiskChart" style="height:300px"></div>
+                </div>
+              </div>
+              <div class="col-md-6">
+                <div class="cardx p-3 h-100">
+                  <h2 class="h6">หน่วยงานที่ทำสัญญาด้วย</h2>
+                  <div class="table-wrap"><table class="table table-sm mini-table mb-0">
+                    <thead><tr><th scope="col">หน่วยงาน</th><th scope="col" class="text-end">มูลค่า</th>
+                      <th scope="col" class="text-end">สัญญา</th><th scope="col" class="text-end">สัดส่วน</th></tr></thead>
+                    <tbody id="contractorPairBody"></tbody></table></div>
+                </div>
+              </div>
+              <div class="col-md-6">
+                <div class="cardx p-3 h-100">
+                  <h2 class="h6">สัญญาที่ควรตรวจสอบ</h2>
+                  <div class="table-wrap"><table class="table table-sm mini-table mb-0">
+                    <thead><tr><th scope="col">โครงการ</th><th scope="col" class="text-end">มูลค่า</th>
+                      <th scope="col" class="text-end">คะแนน</th></tr></thead>
+                    <tbody id="contractorCaseBody"></tbody></table></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ แนวโน้มเวลา ============ -->
+      <div class="tab-pane fade" id="tab-time" role="tabpanel" aria-labelledby="pill-time">
+        <div class="cardx p-3 mb-3">
+          <div class="row g-2 align-items-end">
+            <div class="col-6 col-md-3">
+              <label class="form-label" for="tsDimension">แยกตาม</label>
+              <select class="form-select form-select-sm" id="tsDimension">
+                <option value="purchase_method_name">วิธีจัดหา</option>
+                <option value="project_type_name">ประเภทโครงการ</option>
+                <option value="risk_band">ระดับความเสี่ยง</option>
+              </select>
+            </div>
+            <div class="col-6 col-md-3">
+              <label class="form-label" for="tsMetric">แสดงค่า</label>
+              <select class="form-select form-select-sm" id="tsMetric">
+                <option value="counts">จำนวนสัญญา</option>
+                <option value="values">มูลค่าสัญญา</option>
+              </select>
+            </div>
+          </div>
+        </div>
+        <div class="cardx p-3 mb-3">
+          <div class="card-title-row"><h2 class="h6 mb-0">แนวโน้มรายเดือน</h2>
+            <span class="badge badge-real">ข้อมูลจริง</span></div>
+          <div class="small-muted mb-2" id="tsNote"></div>
+          <div id="timeChart" style="height:420px"></div>
+        </div>
+        <div class="cardx p-3">
+          <div class="card-title-row"><h2 class="h6 mb-0">สรุปรายเดือน</h2>
+            <span class="badge badge-derived">คำนวณ</span></div>
+          <div class="table-wrap"><table class="table table-sm mini-table mb-0">
+            <thead><tr><th scope="col">เดือน</th><th scope="col" class="text-end">สัญญา</th>
+              <th scope="col" class="text-end">มูลค่า</th><th scope="col" class="text-end">เข้าเงื่อนไข</th>
+              <th scope="col" class="text-end">คะแนนเฉลี่ย</th></tr></thead>
+            <tbody id="tsMonthBody"></tbody></table></div>
+        </div>
+      </div>
+
+      <!-- ============ กฎและการตั้งค่า ============ -->
+      <div class="tab-pane fade" id="tab-rules" role="tabpanel" aria-labelledby="pill-rules">
+        <div class="cardx p-3 mb-3">
+          <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+            <div>
+              <h2 class="h6 mb-1">ตารางอธิบายกฎ R1-R17</h2>
+              <div class="small-muted">คลิกหัวคอลัมน์เพื่อเรียงลำดับ · จำนวนที่พบคำนวณจากชุดข้อมูลที่กรองอยู่</div>
+            </div>
+            <button class="btn btn-sm btn-outline-secondary" id="ruleTableExport" type="button">ส่งออก CSV</button>
+          </div>
+          <div class="table-wrap rule-table-wrap">
+            <table class="table table-sm mini-table mb-0 rule-table">
+              <thead><tr>
+                <th scope="col">ชื่อ</th>
+                <th scope="col">คำอธิบายกฎ</th>
+                <th scope="col">ที่มา</th>
+                <th scope="col">การคำนวณ</th>
+                <th scope="col" class="text-end">พบ</th>
+              </tr></thead>
+              <tbody id="ruleTableBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="cardx p-3 mb-3">
+          <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+            <div>
+              <h2 class="h6 mb-1">ปรับเงื่อนไขและน้ำหนักของกฎ</h2>
+              <div class="small-muted">เปลี่ยนค่าแล้วผลจะคำนวณใหม่ทันทีทุกแท็บ ค่าที่ตั้งไว้จะถูกจำในเบราว์เซอร์นี้</div>
+            </div>
+            <button class="btn btn-sm btn-outline-secondary" id="ruleReset" type="button">คืนค่าเริ่มต้น</button>
+          </div>
+        </div>
+        <div id="ruleSettings"></div>
+      </div>
+
+      <!-- ============ ส่วนสาธิต ============ -->
+      <div class="tab-pane fade" id="tab-demo" role="tabpanel" aria-labelledby="pill-demo">
+        <div class="hero-demo mb-3">
+          <h1 class="h5 mb-2">ส่วนสาธิต (ไม่ใช่ข้อมูลจริง)</h1>
+          <div class="small" id="demoDisclaimer"></div>
+        </div>
+        <div class="warn-note mb-3">
+          ทุกอย่างในแท็บนี้เป็นข้อมูลสังเคราะห์เพื่อสาธิตแนวคิดเท่านั้น ไม่ได้มาจากชุดข้อมูลจริง
+          และ<strong>ไม่ถูกนับรวมในคะแนนความเสี่ยง</strong>ที่แสดงในแท็บอื่น
+          ชุดข้อมูลต้นฉบับไม่มีข้อมูลกรรมการ ผู้ถือหุ้น ที่อยู่จดทะเบียน ผู้รับเหมาช่วง
+          จำนวนผู้เสนอราคา และวันปิดรับซอง
+        </div>
+        <div class="row g-3">
+          <div class="col-12">
+            <div class="cardx p-3">
+              <div class="card-title-row"><h2 class="h6 mb-0">กระดานติดตามการตรวจสอบ</h2>
+                <span class="badge badge-synthetic">ข้อมูลสาธิต</span></div>
+              <div id="kanban" class="row g-3 mt-1"></div>
+            </div>
+          </div>
+          <div class="col-lg-4">
+            <div class="cardx p-3 h-100">
+              <div class="card-title-row"><h2 class="h6 mb-0">กรรมการร่วม</h2>
+                <span class="badge badge-synthetic">ข้อมูลสาธิต</span></div>
+              <div class="table-wrap"><table class="table table-sm mini-table mb-0">
+                <thead><tr><th scope="col">บุคคล</th><th scope="col">บริษัทที่เชื่อมโยง</th></tr></thead>
+                <tbody id="demoDirectorBody"></tbody></table></div>
+            </div>
+          </div>
+          <div class="col-lg-4">
+            <div class="cardx p-3 h-100">
+              <div class="card-title-row"><h2 class="h6 mb-0">ที่อยู่จดทะเบียนร่วม</h2>
+                <span class="badge badge-synthetic">ข้อมูลสาธิต</span></div>
+              <div class="table-wrap"><table class="table table-sm mini-table mb-0">
+                <thead><tr><th scope="col">ที่อยู่</th><th scope="col">บริษัทที่เชื่อมโยง</th></tr></thead>
+                <tbody id="demoAddressBody"></tbody></table></div>
+            </div>
+          </div>
+          <div class="col-lg-4">
+            <div class="cardx p-3 h-100">
+              <div class="card-title-row"><h2 class="h6 mb-0">ผู้รับเหมาช่วงร่วม</h2>
+                <span class="badge badge-synthetic">ข้อมูลสาธิต</span></div>
+              <div class="table-wrap"><table class="table table-sm mini-table mb-0">
+                <thead><tr><th scope="col">ผู้รับเหมาช่วง</th><th scope="col">บริษัทที่เชื่อมโยง</th></tr></thead>
+                <tbody id="demoSubcontractorBody"></tbody></table></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="detailModal" tabindex="-1" aria-labelledby="detailModalTitle" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="detailModalTitle">รายละเอียด</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="ปิด"></button>
+      </div>
+      <div class="modal-body" id="detailModalBody"></div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+<script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<!-- ?v= บังคับให้เบราว์เซอร์โหลดไฟล์ใหม่หลังแก้โค้ด ให้เพิ่มเลขนี้เมื่อแก้ไฟล์ในโฟลเดอร์ js/ -->
+<script src="js/util.js?v=14"></script>
+<script src="js/rules.js?v=14"></script>
+<script src="js/analytics.js?v=14"></script>
+<script src="js/charts.js?v=14"></script>
+<script src="js/tablesort.js?v=14"></script>
+<script src="js/app.js?v=14"></script>
+</body>
+</html>
